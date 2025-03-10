@@ -30,6 +30,13 @@ To run the example locally you need to:
 4. `npm install` to install the required dependencies.
 5. `npm run dev` to launch the development server.
 
+env Variables <br>
+GOOGLE_GENERATIVE_AI_API_KEY=  
+AUTH_GOOGLE_ID=  
+AUTH_GOOGLE_SECRET=  
+DATABASE_URL=  
+AUTH_SECRET=  
+
 
 ## Learn More
 
