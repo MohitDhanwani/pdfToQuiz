@@ -2,39 +2,42 @@
 
 import { useState } from "react";
 import { experimental_useObject } from "ai/react";
-import { questionsSchema } from "@/lib/schemas";
+import { questionsSchema, flashcardsSchema, shortAnswerQuestionsSchema } from "@/lib/schemas";
 import { z } from "zod";
 import { toast } from "sonner";
 import { FileUp, Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card,CardContent,CardFooter,CardHeader,CardTitle,CardDescription} from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import Quiz from "@/components/quiz";
+import ShortAnswerQuiz from "@/components/shortAnswerQuiz";
+import Flashcards from "@/components/flashcard";
 import { Link } from "@/components/ui/link";
 import NextLink from "next/link";
 import { generateQuizTitle } from "./actions";
 import { AnimatePresence, motion } from "framer-motion";
 import { VercelIcon, GitIcon } from "@/components/icons";
+import { useSession } from "next-auth/react";
+import Modal from "@/components/Modal";
 
 export default function ChatWithFiles() {
+  const session = useSession();
+  
   const [files, setFiles] = useState<File[]>([]);
-  const [questions, setQuestions] = useState<z.infer<typeof questionsSchema>>(
-    [],
-  );
+  const [questions, setQuestions] = useState<z.infer<typeof questionsSchema>>([]);
+  const [shortAnswerQuestions, setShortAnswerQuestions] = useState<z.infer<typeof shortAnswerQuestionsSchema>>([]);
+  const [flashcards, setFlashcards] = useState<z.infer<typeof flashcardsSchema>>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [title, setTitle] = useState<string>();
+  const [showModal, setShowModal] = useState(false);
+  const [generationType, setGenerationType] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
+  // Quiz generation
   const {
-    submit,
+    submit: submitQuiz,
     object: partialQuestions,
-    isLoading,
+    isLoading: isLoadingQuiz,
   } = experimental_useObject({
     api: "/api/generate-quiz",
     schema: questionsSchema,
@@ -42,9 +45,51 @@ export default function ChatWithFiles() {
     onError: (error) => {
       toast.error("Failed to generate quiz. Please try again.");
       setFiles([]);
+      setIsGenerating(false);
     },
     onFinish: ({ object }) => {
       setQuestions(object ?? []);
+      setIsGenerating(false);
+    },
+  });
+
+  // Short Answer Quiz generation
+  const {
+    submit: submitShortAnswerQuiz,
+    object: partialShortAnswerQuestions,
+    isLoading: isLoadingShortAnswerQuiz,
+  } = experimental_useObject({
+    api: "/api/generate-short-answers",
+    schema: shortAnswerQuestionsSchema,
+    initialValue: undefined,
+    onError: (error) => {
+      toast.error("Failed to generate short answer questions. Please try again.");
+      setFiles([]);
+      setIsGenerating(false);
+    },
+    onFinish: ({ object }) => {
+      setShortAnswerQuestions(object ?? []);
+      setIsGenerating(false);
+    },
+  });
+
+  // Flashcard generation
+  const {
+    submit: submitFlashcards,
+    object: partialFlashcards,
+    isLoading: isLoadingFlashcards,
+  } = experimental_useObject({
+    api: "/api/generate-flashcard",
+    schema: flashcardsSchema,
+    initialValue: undefined,
+    onError: (error) => {
+      toast.error("Failed to generate flashcards. Please try again.");
+      setFiles([]);
+      setIsGenerating(false);
+    },
+    onFinish: ({ object }) => {
+      setFlashcards(object ?? []);
+      setIsGenerating(false);
     },
   });
 
@@ -80,30 +125,103 @@ export default function ChatWithFiles() {
     });
   };
 
-  const handleSubmitWithFiles = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmitWithFiles = async (type: string) => {
+    // Check login status
+    if (session.status !== "authenticated") {
+      toast.error("Please login to generate content");
+      return;
+    }
+
+    setGenerationType(type);
+    setIsGenerating(true);
+    setShowModal(false);
+    
+    try {
+      const encodedFiles = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          type: file.type,
+          data: await encodeFileAsBase64(file),
+        })),
+      );
+      
+      const generatedTitle = await generateQuizTitle(encodedFiles[0].name);
+      setTitle(generatedTitle);
+      
+      if (type === "Quiz") {
+        submitQuiz({ files: encodedFiles });
+      } else if (type === "Short/Long Answer") {
+        submitShortAnswerQuiz({ files: encodedFiles });
+      } else if (type === "Flash Card") {
+        submitFlashcards({ files: encodedFiles });
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to process file. Please try again.");
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    const encodedFiles = await Promise.all(
-      files.map(async (file) => ({
-        name: file.name,
-        type: file.type,
-        data: await encodeFileAsBase64(file),
-      })),
-    );
-    submit({ files: encodedFiles });
-    const generatedTitle = await generateQuizTitle(encodedFiles[0].name);
-    setTitle(generatedTitle);
+    setShowModal(true);
   };
 
   const clearPDF = () => {
     setFiles([]);
     setQuestions([]);
+    setShortAnswerQuestions([]);
+    setFlashcards([]);
+    setGenerationType(null);
   };
 
-  const progress = partialQuestions ? (partialQuestions.length / 4) * 100 : 0;
+  const quizProgress = partialQuestions ? (partialQuestions.length / 4) * 100 : 0;
+  const shortAnswerQuizProgress = partialShortAnswerQuestions ? (partialShortAnswerQuestions.length / 4) * 100 : 0;
+  const flashcardProgress = partialFlashcards ? (partialFlashcards.length / 8) * 100 : 0;
 
-  if (questions.length === 4) {
+  // Get progress based on generation type
+  const getProgress = () => {
+    if (generationType === "Quiz") return quizProgress;
+    if (generationType === "Short/Long Answer") return shortAnswerQuizProgress;
+    if (generationType === "Flash Card") return flashcardProgress;
+    return 0;
+  };
+
+  // Get item count text based on generation type
+  const getItemCountText = () => {
+    if (generationType === "Quiz") {
+      return partialQuestions
+        ? `Generating question ${partialQuestions.length + 1} of 4`
+        : "Analyzing PDF content";
+    }
+    if (generationType === "Short/Long Answer") {
+      return partialShortAnswerQuestions
+        ? `Generating question ${partialShortAnswerQuestions.length + 1} of 4`
+        : "Analyzing PDF content";
+    }
+    if (generationType === "Flash Card") {
+      return partialFlashcards
+        ? `Generating flashcard ${partialFlashcards.length + 1} of 8`
+        : "Analyzing PDF content";
+    }
+    return "Analyzing PDF content";
+  };
+
+  if (questions.length === 4 && generationType === "Quiz") {
     return (
       <Quiz title={title ?? "Quiz"} questions={questions} clearPDF={clearPDF} />
+    );
+  }
+
+  if (shortAnswerQuestions.length === 4 && generationType === "Short/Long Answer") {
+    return (
+      <ShortAnswerQuiz title={title ?? "Short/Long Answer Quiz"} questions={shortAnswerQuestions} clearPDF={clearPDF} />
+    );
+  }
+
+  if (flashcards.length === 8 && generationType === "Flash Card") {
+    return (
+      <Flashcards title={title ?? "Flashcards"} flashcards={flashcards} clearPDF={clearPDF} />
     );
   }
 
@@ -154,10 +272,10 @@ export default function ChatWithFiles() {
           </div>
           <div className="space-y-2">
             <CardTitle className="text-2xl font-bold">
-              PDF Quiz Generator
+              PDF Content Generator
             </CardTitle>
             <CardDescription className="text-base">
-              Upload a PDF to generate an interactive quiz based on its content
+              Upload a PDF to generate quizzes, flashcards, or short/long answer questions based on its content
               using the <Link href="https://sdk.vercel.ai">AI SDK</Link> and{" "}
               <Link href="https://sdk.vercel.ai/providers/ai-sdk-providers/google-generative-ai">
                 Google&apos;s Gemini Pro
@@ -167,7 +285,7 @@ export default function ChatWithFiles() {
           </div>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmitWithFiles} className="space-y-4">
+          <form className="space-y-4">
             <div
               className={`relative flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 transition-colors hover:border-muted-foreground/50`}
             >
@@ -188,42 +306,52 @@ export default function ChatWithFiles() {
                 )}
               </p>
             </div>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={files.length === 0}
+            <Button 
+              className="w-full" 
+              disabled={files.length === 0 || isGenerating}
+              onClick={handleGenerateClick}
             >
-              {isLoading ? (
+              {isGenerating ? (
                 <span className="flex items-center space-x-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Generating Quiz...</span>
+                  <span>Generating {generationType}...</span>
                 </span>
               ) : (
-                "Generate Quiz"
+                "Generate"
               )}
             </Button>
           </form>
+          
+          {showModal && (
+            <Modal 
+              onSelectType={handleSubmitWithFiles}
+              onClose={() => setShowModal(false)}
+            />
+          )}
         </CardContent>
-        {isLoading && (
+        {isGenerating && (
           <CardFooter className="flex flex-col space-y-4">
             <div className="w-full space-y-1">
               <div className="flex justify-between text-sm text-muted-foreground">
                 <span>Progress</span>
-                <span>{Math.round(progress)}%</span>
+                <span>
+                  {Math.round(getProgress())}%
+                </span>
               </div>
-              <Progress value={progress} className="h-2" />
+              <Progress 
+                value={getProgress()} 
+                className="h-2" 
+              />
             </div>
             <div className="w-full space-y-2">
               <div className="grid grid-cols-6 sm:grid-cols-4 items-center space-x-2 text-sm">
                 <div
                   className={`h-2 w-2 rounded-full ${
-                    isLoading ? "bg-yellow-500/50 animate-pulse" : "bg-muted"
+                    isGenerating ? "bg-yellow-500/50 animate-pulse" : "bg-muted"
                   }`}
                 />
                 <span className="text-muted-foreground text-center col-span-4 sm:col-span-2">
-                  {partialQuestions
-                    ? `Generating question ${partialQuestions.length + 1} of 4`
-                    : "Analyzing PDF content"}
+                  {getItemCountText()}
                 </span>
               </div>
             </div>

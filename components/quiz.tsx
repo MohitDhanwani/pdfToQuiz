@@ -2,14 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Check,
-  X,
-  RefreshCw,
-  FileText,
-} from "lucide-react";
+import {ChevronLeft,ChevronRight,Check,X,RefreshCw,FileText} from "lucide-react";
 import QuizScore from "./score";
 import QuizReview from "./quiz-overview";
 import { Question } from "@/lib/schemas";
@@ -41,15 +34,14 @@ const QuestionCard: React.FC<{
             variant={
               selectedAnswer === answerLabels[index] ? "secondary" : "outline"
             }
-            className={`h-auto py-6 px-4 justify-start text-left whitespace-normal ${
-              showCorrectAnswer && answerLabels[index] === question.answer
-                ? "bg-green-600 hover:bg-green-700"
-                : showCorrectAnswer &&
-                    selectedAnswer === answerLabels[index] &&
-                    selectedAnswer !== question.answer
-                  ? "bg-red-600 hover:bg-red-700"
-                  : ""
-            }`}
+            className={`h-auto py-6 px-4 justify-start text-left whitespace-normal ${showCorrectAnswer && answerLabels[index] === question.answer
+              ? "bg-green-600 hover:bg-green-700"
+              : showCorrectAnswer &&
+                selectedAnswer === answerLabels[index] &&
+                selectedAnswer !== question.answer
+                ? "bg-red-600 hover:bg-red-700"
+                : ""
+              }`}
             onClick={() => onSelectAnswer(answerLabels[index])}
           >
             <span className="text-lg font-medium mr-4 shrink-0">
